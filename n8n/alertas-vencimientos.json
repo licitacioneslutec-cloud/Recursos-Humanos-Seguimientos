@@ -1,0 +1,237 @@
+{
+  "name": "Talento Humano LUTEC - Alertas de vencimiento",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "name": "Todos los días 7am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "document",
+        "operation": "getAll",
+        "authentication": "serviceAccount",
+        "projectId": "PEGAR_ID_PROYECTO_FIREBASE",
+        "collection": "config",
+        "returnAll": true,
+        "simple": true
+      },
+      "name": "Config",
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        300
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "",
+          "name": "Firebase cuenta de servicio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "document",
+        "operation": "getAll",
+        "authentication": "serviceAccount",
+        "projectId": "PEGAR_ID_PROYECTO_FIREBASE",
+        "collection": "empleados",
+        "returnAll": true,
+        "simple": true
+      },
+      "name": "Empleados",
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        300
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "",
+          "name": "Firebase cuenta de servicio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "document",
+        "operation": "getAll",
+        "authentication": "serviceAccount",
+        "projectId": "PEGAR_ID_PROYECTO_FIREBASE",
+        "collection": "contratos",
+        "returnAll": true,
+        "simple": true
+      },
+      "name": "Contratos",
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        300
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "",
+          "name": "Firebase cuenta de servicio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "document",
+        "operation": "getAll",
+        "authentication": "serviceAccount",
+        "projectId": "PEGAR_ID_PROYECTO_FIREBASE",
+        "collection": "certificaciones",
+        "returnAll": true,
+        "simple": true
+      },
+      "name": "Certificaciones",
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        300
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "",
+          "name": "Firebase cuenta de servicio"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Avisa al jefe de cada área (con copia a RRHH) cuando a un contrato o certificación le faltan exactamente 15 o 5 días.\n// Corre una vez al día: si un día no corre, ese aviso se pierde (la app sigue mostrando el semáforo).\nconst AVISOS = [15, 5];\nconst pad = n => String(n).padStart(2, '0');\nconst ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota' }));\nconst hoy = `${ahora.getFullYear()}-${pad(ahora.getMonth() + 1)}-${pad(ahora.getDate())}`;\nconst dias = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);\nconst fmt = s => s.split('-').reverse().join('/');\nconst esc = s => String(s ?? '').replace(/[&<>\"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]));\nconst docs = n => $(n).all().map(i => i.json).filter(d => d && Object.keys(d).length);\n\nconst cfg = docs('Config').find(c => (c._id || c.id) === 'general') || {};\nconst emps = new Map(docs('Empleados').filter(e => e.estado !== 'retirado').map(e => [String(e.cedula || e._id), e]));\n// Jefe de cada área = colaborador activo elegido en Ajustes (areas[].jefeCedula).\nconst jefes = new Map((cfg.areas || []).map(a => [a.nombre, emps.get(String(a.jefeCedula))]).filter(([, j]) => j));\n\nconst ctr = new Map();\nfor (const c of docs('Contratos')) if (!ctr.has(c.cedula) || ctr.get(c.cedula).inicio < c.inicio) ctr.set(c.cedula, c);\nconst cert = new Map();\nfor (const c of docs('Certificaciones')) {\n  if (!c.vencimiento) continue;\n  const k = c.cedula + '|' + c.tipo;\n  if (!cert.has(k) || cert.get(k).vencimiento < c.vencimiento) cert.set(k, c);\n}\n\nconst filas = [];\nfor (const c of ctr.values()) if (c.fin) filas.push({ ced: c.cedula, que: `Contrato ${c.tipo}`, fecha: c.fin });\nfor (const c of cert.values()) filas.push({ ced: c.cedula, que: c.tipo, fecha: c.vencimiento });\n\nconst porCorreo = {};\nfor (const f of filas) {\n  const e = emps.get(String(f.ced));\n  const d = dias(hoy, f.fecha);\n  if (!e || !AVISOS.includes(d)) continue;\n  const j = jefes.get(e.area);\n  const correoJefe = j && (j.correoEmpresarial || j.correoPersonal);\n  const para = correoJefe || cfg.correoRRHH; // sin jefe activo o sin correo: va a RRHH\n  if (!para) continue;\n  (porCorreo[para] ||= { jefe: correoJefe ? j.nombres : 'equipo de Talento Humano', filas: [] }).filas.push({ ...f, d, e });\n}\n\nreturn Object.entries(porCorreo).map(([to, g]) => ({\n  json: {\n    to,\n    cc: cfg.correoRRHH && cfg.correoRRHH !== to ? cfg.correoRRHH : '',\n    subject: `Vencimientos próximos: ${g.filas.length} colaborador(es)`,\n    html: `<p>Hola ${esc(g.jefe)},</p><p>Estos vencimientos de tu equipo requieren gestión:</p>\n<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;font-family:Arial;font-size:13px\">\n<tr style=\"background:#0f2a4a;color:#fff\"><th>Colaborador</th><th>Cédula</th><th>Cargo</th><th>Qué vence</th><th>Fecha</th><th>Días</th></tr>\n${g.filas.sort((a, b) => a.d - b.d).map(f => `<tr><td>${esc(f.e.nombres)} ${esc(f.e.apellidos)}</td><td>${esc(f.ced)}</td><td>${esc(f.e.cargo)}</td><td>${esc(f.que)}</td><td>${fmt(f.fecha)}</td><td><b>${f.d}</b></td></tr>`).join('\\n')}\n</table><p>Por favor confirma a Talento Humano si se renueva o no.</p>`,\n  },\n}));\n"
+      },
+      "name": "Armar avisos por jefe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "fromEmail": "Talento Humano LUTEC <PEGAR_CORREO_REMITENTE>",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "ccEmail": "={{ $json.cc }}",
+          "appendAttribution": false
+        }
+      },
+      "name": "Enviar correo",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "SMTP LUTEC"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Todos los días 7am": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Empleados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Empleados": {
+      "main": [
+        [
+          {
+            "node": "Contratos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contratos": {
+      "main": [
+        [
+          {
+            "node": "Certificaciones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Certificaciones": {
+      "main": [
+        [
+          {
+            "node": "Armar avisos por jefe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar avisos por jefe": {
+      "main": [
+        [
+          {
+            "node": "Enviar correo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "America/Bogota"
+  }
+}

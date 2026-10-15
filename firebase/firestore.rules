@@ -1,0 +1,20 @@
+rules_version = '2';
+// Solo las cuentas cuyo UID exista en la colección "admins" pueden leer o escribir.
+// Los documentos de "admins" se crean a mano desde la consola (nadie puede crearlos desde la app).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function esRRHH() {
+      return request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+    }
+    // El historial es de auditoría: se puede crear y leer, nunca editar ni borrar.
+    match /historial/{id} {
+      allow read, create: if esRRHH();
+    }
+    match /{col}/{id} {
+      allow read, write: if esRRHH() && col != 'admins' && col != 'historial';
+    }
+  }
+}

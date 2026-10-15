@@ -1,0 +1,9 @@
+# Sitio estático, sin compilación. Las carpetas firebase/ y n8n/ no se usan en el navegador.
+[build]
+  publish = "."
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "same-origin"
